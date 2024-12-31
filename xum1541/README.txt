@@ -47,7 +47,8 @@ USB bootloader builtin. This means that you don't need any special cables
 to flash the device. Simply plug it into your USB port and program it. I
 recommend the free Atmel Flip or avrdude programming software.
 
-The steps to program the firmware with Flip are:
+Programming using the Atmel Flip software
+-----------------------------------------
 
 1. Start up Atmel Flip
 2. Select the appropriate device type (Device->Select). Choose one of
@@ -84,6 +85,14 @@ You're done! Now unplug and replug in the xum1541 and verify it is present
 by running "cbmctrl detect". You should see something like:
 
     8: 1540 or 1541 (XP1541)
+
+Programming using AVRDUDE
+-------------------------
+
+On Linux, as root, for Arduino Pro Micro. Adjust parameters as needed.
+
+1. stty -F /dev/ttyACM0 speed 1200  # to reset the device
+2. avrdude -p m32U4 -P /dev/ttyACM0 -c avr109 -U flash:w:xum1541-PROMICRO-vXX.hex
 
 
 Compiling
@@ -198,6 +207,48 @@ pins. It runs at 5V with the board supplying power for the inverter.
 For build info, see the included schematic, zoomfloppy-schem-*.png.
 
 
+Arduino Pro Micro model (recommended DIY version)
+=================================================
+The Arduino Pro Micro is a very small low-cost 24 pin board with an
+ATMEGA32U4 controller. It is available in various places.
+Compatible clones exist on ebay.com and other places.
+
+You need the 5V/16MHz version: Make sure a 16MHz crystal is installed,
+and the J1 jumper is shortened (default on most boards these days).
+
+No additional components are required (unless you're building the 7406 version
+which is closer to the original ZoomFloppy design and supports SRQ nibbling)
+all the IEC lines can be soldered directly to the board:
+
+    PB2 (MOSI, ATMEGA Pin 10, D16, "16" mark on board)   DATA
+    PB3 (MISO, ATMEGA Pin 11, D17, "14" mark on board)   CLK
+    PB4 (ADC11, ATMEGA Pin 28, D8, "8" mark on board)    ATN
+    PB5 (ADC12, ATMEGA Pin 29, D9, "9" mark on board)    SRQ
+    PB6 (ADC13, ATMEGA Pin 30, D10, "10" mark on board)  RESET
+
+  IN pins only for 7406 model
+    PC6 (ATMEGA Pin 31, D5, "5" mark on board)           DATA IN
+    PB1 (SCK, ATMEGA Pin 9, D15, "15" mark on board)     CLK IN
+    PE6 (ATMEGA Pin 1, D7, "7" mark on board)            ATN IN
+    PD4 (ADC8, ATMEGA Pin 25, D4, "4" mark on board)     SRQ IN
+    PD7 (ADC10, ATMEGA Pin 27, D6, "6" mark on board)    RESET IN
+
+  Optional parallel connection
+    PD0 (SCL, ATMEGA Pin 18, D3, "3" mark on board)      DATA0
+    PD1 (SDA, ATMEGA Pin 19, D2, "2" mark on board)      DATA1
+    PD2 (RX, ATMEGA Pin 20, RXI, "RXI" mark on board)    DATA2
+    PD3 (TX, ATMEGA Pin 21, TXO, "TXO" mark on board)    DATA3
+    PF4 (ADC4, ATMEGA Pin 39, A3, "A3" mark on board)    DATA4
+    PF5 (ADC5, ATMEGA Pin 38, A2, "A2" mark on board)    DATA5
+    PF6 (ADC6, ATMEGA Pin 37, A1, "A1" mark on board)    DATA6
+    PF7 (ADC7, ATMEGA Pin 36, A0, "A0" mark on board)    DATA7
+
+    PD5 (ATMEGA Pin 22)        LED     already on the board
+
+    PD2        RXD1    UART for debug output
+    PD3        TXD1    (optional, under #ifdef DEBUG)
+
+
 USBKEY model
 ============
 This is the first generation board and is based on the Atmel AT90USBKEY
@@ -270,43 +321,6 @@ directly to the board:
 The Teensy also comes with a built-in "HalfKay" Bootloader and it's
 own firmware update utility. See PRJC's homepage for details.
 
-
-Arduino Pro Micro model
-=======================
-The Arduino Pro Micro is a very small, low-cost board with an ATMEGA32U4
-controller. It is available in various places. Compatible clones exist on
-ebay.com and other places.
-
-No additional components are required (unless you're building the 7406 version
-which is closer to the original ZoomFloppy design and supports SRQ nibbling)
-all the IEC lines can be soldered directly to the board:
-
-    PB2 (16)   DATA
-    PB3 (14)   CLK
-    PB4 (8)    ATN
-    PB5 (9)    SRQ
-    PB6 (10)   RESET
-
-  IN pins only for 7406 model
-    PC6 (5)    DATA IN
-    PB1 (15)   CLK IN
-    PE6 (7)    ATN IN
-    PD4 (4)    SRQ IN
-    PD7 (6)    RESET IN
-
-    PD0 (3)    DATA0 (optional parallel connection)
-    PD1 (2)    DATA1 (optional parallel connection)
-    PD2 (RXI)  DATA2 (optional parallel connection)
-    PD3 (TXO)  DATA3 (optional parallel connection)
-    PF4 (A3)   DATA4 (optional parallel connection)
-    PF5 (A2)   DATA5 (optional parallel connection)
-    PF6 (A1)   DATA6 (optional parallel connection)
-    PF7 (A0)   DATA7 (optional parallel connection)
-
-    PD5        LED     already on the board
-
-    PD2        RXD1    UART for debug output
-    PD3        TXD1    (optional, under #ifdef DEBUG)
 
 Other models
 ============
