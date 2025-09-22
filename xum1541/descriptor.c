@@ -7,6 +7,12 @@
  * as published by the Free Software Foundation; either version
  * 2 of the License, or (at your option) any later version.
  */
+
+#if MODEL == RP2040
+// RP2040 uses separate USB descriptor file
+// See usb_descriptors_rp2040.c
+#else
+
 #include <avr/pgmspace.h>
 #include <LUFA/Drivers/USB/USB.h>
 #include "xum1541.h"
@@ -184,3 +190,5 @@ CALLBACK_USB_GetDescriptor(const uint16_t wValue, const uint8_t wIndex,
     *DescriptorAddress = Address;
     return Size;
 }
+
+#endif // MODEL == RP2040

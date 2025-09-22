@@ -23,6 +23,9 @@ typedef void (*Write2Fn_t)(uint8_t *data);
 static uint16_t usbDataLen;
 static uint8_t usbDataDir = XUM_DATA_DIR_NONE;
 
+static uint32_t i_executed_command = 0;
+
+
 // Are we in the middle of a command sequence (XUM1541_INIT .. SHUTDOWN)?
 #define XUM1541_CMD_IN_PROGRESS 0x80
 static uint8_t cmdSeqInProgress;
@@ -37,10 +40,21 @@ static uint8_t savedNibWrites[4], *savedNibWritePtr;
 // Protocol handlers to use, set in cbm_init().
 struct ProtocolFunctions *cmds;
 
+// Version strings for control commands
+static const char gitRevision[] PROGMEM = __XUM1541_GIT_REVISION__;
+static const char gccVersion[] PROGMEM = __XUM1541_GCC_VERSION__;
+static const char libcVersion[] PROGMEM = __XUM1541_LIBC_VERSION__;
+
 static int nib_check_write(uint8_t data);
 
 // Allow setting tracking var usbDataLen from outside.
 void Set_usbDataLen(uint16_t Len) { usbDataLen = Len; }
+
+// Reset USB transfer state (called from USB callbacks)
+void Reset_usbState(void) {
+    usbDataDir = XUM_DATA_DIR_NONE;
+    usbDataLen = 0;
+}
 
 /*
  * Probe for CBM 153x tape device first. If found enter tape mode and
@@ -87,6 +101,11 @@ usbInitIo(uint16_t len, uint8_t dir)
         DEBUGF(DBG_ERROR, "ERR: usbInitIo left in bad state %d\n", usbDataDir);
 #endif
 
+#if USING_TINYUSB
+    // For TinyUSB, just track the state variables
+    usbDataLen = len;
+    usbDataDir = dir;
+#else
     // Select the proper endpoint for this direction
     if (dir == ENDPOINT_DIR_IN) {
         Endpoint_SelectEndpoint(XUM_BULK_IN_ENDPOINT);
@@ -108,11 +127,43 @@ usbInitIo(uint16_t len, uint8_t dir)
      */
     while (!Endpoint_IsReadWriteAllowed())
         ;
+#endif
 }
 
 void
 usbIoDone(void)
 {
+#if USING_TINYUSB
+    // Finalize any outstanding transactions (like LUFA version)
+    DEBUGF(DBG_INFO, "usbIoDone\n");
+    if (usbDataDir == ENDPOINT_DIR_IN) {
+        // Final flush to ensure all data is sent
+        tud_vendor_n_flush(0);
+    } else if (usbDataDir == ENDPOINT_DIR_OUT) {
+        /*
+         * If we didn't consume all data from the host, discard it now.
+         * This handles cases where transfers are aborted or incomplete.
+         */
+        if (usbDataLen != 0) {
+            // Read and discard remaining bytes
+            uint8_t discardBuf[32];
+            while (usbDataLen > 0 && tud_vendor_n_available(0)) {
+                uint32_t available = tud_vendor_n_available(0);
+                uint32_t to_discard = (usbDataLen < available) ? usbDataLen : available;
+                to_discard = (to_discard < sizeof(discardBuf)) ? to_discard : sizeof(discardBuf);
+                uint32_t discarded = tud_vendor_n_read(0, discardBuf, to_discard);
+                usbDataLen -= discarded;
+                if (discarded == 0) break; // Avoid infinite loop
+            }
+            DEBUGF(DBG_INFO, "Discarded %d bytes in usbIoDone\n", usbDataLen);
+        }
+    } else if (usbDataDir != XUM_DATA_DIR_NONE) {
+        DEBUGF(DBG_ERROR, "done: bad io dir %d\n", usbDataDir);
+    }
+
+    usbDataDir = XUM_DATA_DIR_NONE;
+    usbDataLen = 0;
+#else
     // Finalize any outstanding transactions
     if (usbDataDir == ENDPOINT_DIR_IN) {
         /*
@@ -144,12 +195,48 @@ usbIoDone(void)
     }
     usbDataDir = XUM_DATA_DIR_NONE;
     usbDataLen = 0;
+#endif
 }
 
 int8_t
 usbSendByte(uint8_t data)
 {
+#if USING_TINYUSB
+    // TinyUSB implementation - send individual bytes like AVR
 
+#ifdef DEBUG
+    if (usbDataDir != ENDPOINT_DIR_IN) {
+        DEBUGF(DBG_ERROR, "ERR: usbSendByte when dir was %d\n", usbDataDir);
+        return -1;
+    }
+#endif
+
+    // Check if transfer is being aborted
+    if (doDeviceReset) {
+        DEBUGF(DBG_ERROR, "sndrst\n");
+        return -1;
+    }
+
+    // Send byte directly to TinyUSB
+    while (!tud_vendor_n_write_available(0) && !doDeviceReset) {
+        tud_task();
+    }
+
+    if (doDeviceReset) {
+        return -1;
+    }
+
+    if (tud_vendor_n_write(0, &data, 1) != 1) {
+        DEBUGF(DBG_ERROR, "Failed to write byte to TinyUSB\n");
+        return -1;
+    }
+
+    usbDataLen--;
+
+    // Let TinyUSB handle internal buffering - no manual flushing needed
+
+    return 0;
+#else
 #ifdef DEBUG
     if (usbDataDir != ENDPOINT_DIR_IN) {
         DEBUGF(DBG_ERROR, "ERR: usbSendByte when dir was %d\n", usbDataDir);
@@ -175,12 +262,46 @@ usbSendByte(uint8_t data)
     }
 
     return 0;
+#endif
 }
 
 int8_t
 usbRecvByte(uint8_t *data)
 {
+#if USING_TINYUSB
+    // TinyUSB implementation - read individual bytes like AVR
 
+#ifdef DEBUG
+    if (usbDataDir != ENDPOINT_DIR_OUT) {
+        DEBUGF(DBG_ERROR, "ERR: usbRecvByte when dir was %d\n", usbDataDir);
+        return -1;
+    }
+#endif
+
+    // Check if transfer is being aborted
+    if (doDeviceReset) {
+        DEBUGF(DBG_ERROR, "rcvrst\n");
+        return -1;
+    }
+
+    // Wait for data to be available
+    while (!tud_vendor_n_available(0) && !doDeviceReset) {
+        tud_task();
+    }
+
+    if (doDeviceReset) {
+        return -1;
+    }
+
+    // Read one byte
+    if (tud_vendor_n_read(0, data, 1) != 1) {
+        DEBUGF(DBG_ERROR, "Failed to read byte from TinyUSB\n");
+        return -1;
+    }
+
+    usbDataLen--;
+    return 0;
+#else
 #ifdef DEBUG
     if (usbDataDir != ENDPOINT_DIR_OUT) {
         DEBUGF(DBG_ERROR, "ERR: usbRecvByte when dir was %d\n", usbDataDir);
@@ -210,6 +331,7 @@ usbRecvByte(uint8_t *data)
     usbDataLen--;
 
     return 0;
+#endif
 }
 
 static uint8_t
@@ -559,6 +681,16 @@ nib_check_write(uint8_t data)
 static void
 enterBootLoader(void)
 {
+#if USING_TINYUSB
+    DEBUGF(DBG_INFO, "entering bootloader\n");
+    DELAY_MS(100);
+    tud_disconnect();
+    for(int i = 0; i < 1000; i++) {
+      tud_task();
+      wdt_reset();
+      DELAY_MS(1);
+    }
+#else
     // Control request was handled, so ack it
     Endpoint_ClearSETUP();
     while (!Endpoint_IsINReady())
@@ -570,6 +702,7 @@ enterBootLoader(void)
     wdt_disable();
     USB_ShutDown();
     cli();
+#endif
     cpu_bootloader_start();
 }
 
@@ -578,9 +711,7 @@ enterBootLoader(void)
  * XUM1541_GCCVER and XUM1541_LIBCVER control messages.
  * To be used by the host in diagnostic messages.
  */
-static const char gitRevision[] PROGMEM = __XUM1541_GIT_REVISION__;
-static const char gccVersion[] PROGMEM = __VERSION__;
-static const char libcVersion[] PROGMEM = __AVR_LIBC_VERSION_STRING__;
+// Version strings now defined above conditionally
 
 /*
  * Process the given USB control command, storing the result in replyBuf
@@ -594,7 +725,7 @@ static const char libcVersion[] PROGMEM = __AVR_LIBC_VERSION_STRING__;
 int8_t
 usbHandleControl(uint8_t cmd, uint8_t *replyBuf)
 {
-    DEBUGF(DBG_INFO, "cmd %d (%d)\n", cmd, cmd - XUM1541_IOCTL);
+    DEBUGF(DBG_INFO, "executing control cmd %d (%d)\n", cmd, cmd - XUM1541_IOCTL);
 
     switch (cmd) {
     case XUM1541_ENTER_BOOTLOADER:
@@ -629,11 +760,13 @@ usbHandleControl(uint8_t cmd, uint8_t *replyBuf)
             cmdSeqInProgress = XUM1541_DOING_RESET;
             cmds->cbm_reset(false);
             SetAbortState();
+            DEBUGF(DBG_ERROR, "XUM1541_INIT: SetAbortState\n");
         }
         cmdSeqInProgress |= XUM1541_CMD_IN_PROGRESS;
 
         return 8;
     case XUM1541_SHUTDOWN:
+        DEBUGF(DBG_INFO, "XUM1541_SHUTDOWN\n");
         cmdSeqInProgress = 0;
         set_status(STATUS_READY);
         return 0;
@@ -654,6 +787,7 @@ usbHandleControl(uint8_t cmd, uint8_t *replyBuf)
         strncpy_P((char *)replyBuf, gccVersion, XUM_DEVINFO_SIZE);
         return XUM_DEVINFO_SIZE;
     case XUM1541_LIBCVER:
+        DEBUGF(DBG_INFO, "executing LIBCVER call - after this, for cbmctrl atn, the incoming bulk transfer should get picked up\n");
         strncpy_P((char *)replyBuf, libcVersion, XUM_DEVINFO_SIZE);
         return XUM_DEVINFO_SIZE;
     default:
@@ -681,6 +815,7 @@ usbHandleBulk(uint8_t *request, uint8_t *status)
     cmd = request[0];
     len = *(uint16_t *)&request[2];
     set_status(STATUS_ACTIVE);
+    DEBUGF(DBG_INFO, "processing bulk cmd:%d\n", cmd);
     switch (cmd) {
     case XUM1541_READ:
         // Disallow any other protocols if in IEEE mode.
@@ -823,6 +958,7 @@ usbHandleBulk(uint8_t *request, uint8_t *status)
         DEBUGF(DBG_INFO, "poll=%x\n", XUM_GET_STATUS_VAL(status));
         break;
     case XUM1541_IEC_SETRELEASE:
+        DEBUGF(DBG_INFO, "executing IEC_SETRELEASE command number %d after reseting the device\n", i_executed_command);
         cmds->cbm_setrelease(/*set*/request[1], /*release*/request[2]);
         break;
     case XUM1541_PP_READ:
@@ -908,5 +1044,6 @@ usbHandleBulk(uint8_t *request, uint8_t *status)
         ret = -1;
     }
 
+    DEBUGF(DBG_INFO, "done cmd:%d\n", cmd);
     return ret;
 }

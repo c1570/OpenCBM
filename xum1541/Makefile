@@ -21,8 +21,9 @@
 # PROMICRO_7406: Arduino Pro Micro USB Development Board with 16 MHz ATMEGA32U4 with a 7406
 # MINIMUS: (unsupported) Minimus AVR USB development board with 16 MHz AT90USB162 cpu with 16K flash
 # MINIMUS32: (unsupported) Minimus AVR 32K USB development board with 16 MHz ATmega32U2 cpu with 32K flash
+# RP2040: Raspberry Pi RP2040 microcontroller (uses CMakeLists.txt build system)
 
-MODELS= USBKEY ZOOMFLOPPY BUMBLEB OLIMEX TEENSY2 PROMICRO PROMICRO_7406 MINIMUS MINIMUS32
+MODELS= USBKEY ZOOMFLOPPY BUMBLEB OLIMEX TEENSY2 PROMICRO PROMICRO_7406 MINIMUS MINIMUS32 RP2040
 MODELS_SUPPORTED= ZOOMFLOPPY PROMICRO PROMICRO_7406
 .PHONY: $(MODELS) all unsupported
 
@@ -90,6 +91,12 @@ CPUMODEL=	atmega32u2
 CPURATE=	16000000
 BOARD=		BOARD_MINIMUS32
 BOARD_OBJS=	board-minimus.o
+else ifeq ($(MODEL),RP2040)
+# RP2040 uses CMakeLists.txt and pico-sdk, not this Makefile
+CPUMODEL=	rp2040
+CPURATE=	125000000
+BOARD=		BOARD_RP2040
+BOARD_OBJS=	board-rp2040.o
 endif
 
 # Final name for firmware hex file

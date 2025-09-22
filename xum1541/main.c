@@ -7,12 +7,29 @@
  * as published by the Free Software Foundation; either version
  * 2 of the License, or (at your option) any later version.
  */
+#include "xum1541.h"
+
+#if MODEL != RP2040
 #include <avr/io.h>
 #include <avr/power.h>
 #include <avr/wdt.h>
+#endif
 #include <string.h>
 
-#include "xum1541.h"
+#if USING_TINYUSB
+#include "device/usbd.h"
+#include "device/usbd_pvt.h"
+#include "class/vendor/vendor_device.h"
+#include "common/tusb_fifo.h"
+
+uint8_t xum_rx_fifo_buf[64];
+tu_fifo_t xum_rx_fifo = TU_FIFO_INIT(xum_rx_fifo_buf, 64, uint8_t, false);
+#endif
+
+#if MODEL == RP2040
+// Global variable to store interrupt state for cli()/sei() compatibility
+uint32_t saved_interrupt_state;
+#endif
 
 // Flag indicating we should abort any in-progress data transfers
 volatile bool doDeviceReset;
@@ -41,12 +58,27 @@ main(void)
      * but it runs at 3.3V.
      */
     cpu_init();
+#if USING_TINYUSB
+    // Initialize TinyUSB device stack
+    tud_init(BOARD_TUD_RHPORT);
+    tu_fifo_clear(&xum_rx_fifo);
+
+    // Wait for USB to be ready
+    while (!tud_mounted()) {
+        tud_task();        // Process TinyUSB events
+        watchdog_update(); // Keep watchdog happy
+    }
+    // Note: xum_board_init() instead of board_init() to avoid symbol
+    // conflict with TinyUSB's own board_init() function
+    xum_board_init();
+#else
     USB_Init();
     while (USB_DeviceState < DEVICE_STATE_Powered)
         wdt_reset();
+    board_init();
+#endif
 
     // Indicate device not ready
-    board_init();
     set_status(STATUS_INIT);
     doDeviceReset = false;
 
@@ -61,6 +93,11 @@ main(void)
      * handled separately via IRQs.
      */
     for (;;) {
+#if USING_TINYUSB
+        // TinyUSB device task
+        tud_task();
+#endif
+
         /*
         * Do periodic tasks each command. If we found the device was in
         * a stalled state, reset it before the next command.
@@ -68,6 +105,22 @@ main(void)
         if (!TimerWorker())
             doDeviceReset = false;
 
+#if USING_TINYUSB
+        if (tud_mounted()) {
+            /*
+             * If we just got configured, we're ready now (status
+             * might also be "ACTIVE" here, don't change that).
+             */
+            if (statusValue == STATUS_INIT)
+                set_status(STATUS_READY);
+
+            // Check for and process any commands coming in on the bulk pipe.
+            USB_BulkWorker();
+        } else {
+            // Indicate we are not configured
+            set_status(STATUS_INIT);
+        }
+#else
         if (USB_DeviceState >= DEVICE_STATE_Configured) {
             /*
              * If we just got configured, we're ready now (status
@@ -84,6 +137,7 @@ main(void)
             // Indicate we are not configured
             set_status(STATUS_INIT);
         }
+#endif
     }
 }
 
@@ -102,6 +156,7 @@ set_status(uint8_t status)
 }
 
 // USB event handlers
+#if !USING_TINYUSB
 void
 EVENT_USB_Device_ConfigurationChanged(void)
 {
@@ -120,7 +175,9 @@ EVENT_USB_Device_ConfigurationChanged(void)
     Endpoint_ConfigureEndpoint(XUM_BULK_OUT_ENDPOINT, EP_TYPE_BULK,
         ENDPOINT_DIR_OUT, XUM_ENDPOINT_BULK_SIZE, ENDPOINT_BANK_DOUBLE);
 }
+#endif
 
+#if !USING_TINYUSB
 void
 EVENT_USB_Device_UnhandledControlRequest(void)
 {
@@ -161,6 +218,7 @@ EVENT_USB_Device_UnhandledControlRequest(void)
         Endpoint_ClearIN();
     }
 }
+#endif
 
 // USB IO functions and command handlers
 static bool
@@ -168,7 +226,12 @@ USB_BulkWorker()
 {
     uint8_t cmdBuf[XUM_CMDBUF_SIZE], statusBuf[XUM_STATUSBUF_SIZE];
     int8_t status;
+    static uint32_t debug_count = 0;
 
+#if USING_TINYUSB
+    if(tu_fifo_empty(&xum_rx_fifo))
+        return false;
+#else
     /*
      * If we are not connected to the host or a command has not yet
      * been sent, no more processing is required.
@@ -194,6 +257,7 @@ USB_BulkWorker()
         Endpoint_IsReadWriteAllowed(), Endpoint_IsConfigured(),
         Endpoint_IsINReady(), Endpoint_IsOUTReceived(), Endpoint_IsStalled());
 #endif
+#endif
 
     // Read in the command from the host now that one is ready.
     if (!USB_ReadBlock(cmdBuf, sizeof(cmdBuf))) {
@@ -215,16 +279,25 @@ USB_BulkWorker()
      *   -1: error, no status
      */
     status = usbHandleBulk(cmdBuf, statusBuf);
+    DEBUGF(DBG_INFO, "usbHandleBulk status: %d\n", status);
     if (status > 0) {
         statusBuf[0] = status;
-        USB_WriteBlock(statusBuf, sizeof(statusBuf));
+        DEBUGF(DBG_INFO, "About to call USB_WriteBlock with status %d\n", status);
+        bool writeResult = USB_WriteBlock(statusBuf, sizeof(statusBuf));
+        DEBUGF(DBG_INFO, "USB_WriteBlock returned %d\n", writeResult);
     } else if (status < 0) {
         DEBUGF(DBG_ERROR, "usbblk err\n");
         set_status(STATUS_ERROR);
+#if USING_TINYUSB
+        // TinyUSB handles stalling automatically when we return false from callbacks
+        return false;
+#else
         Endpoint_StallTransaction();
         return false;
+#endif
     }
 
+    DEBUGF(DBG_INFO, "usbBulkWorker cmpl\n");
     return true;
 }
 
@@ -235,6 +308,10 @@ USB_BulkWorker()
 void
 SetAbortState()
 {
+#if USING_TINYUSB
+    // TinyUSB handles stalling automatically when we return false from callbacks
+    doDeviceReset = true;
+#else
     uint8_t origEndpoint = Endpoint_GetCurrentEndpoint();
 
     doDeviceReset = true;
@@ -244,6 +321,7 @@ SetAbortState()
     Endpoint_StallTransaction();
 
     Endpoint_SelectEndpoint(origEndpoint);
+#endif
 }
 
 /*
@@ -256,7 +334,11 @@ SetAbortState()
 bool
 TimerWorker()
 {
+#if USING_TINYUSB
+    watchdog_update();
+#else
     wdt_reset();
+#endif
 
     // Inform the caller to quit the current transfer if we're resetting.
     if (doDeviceReset)
@@ -279,6 +361,75 @@ TimerWorker()
 void
 USB_ResetConfig()
 {
+#if USING_TINYUSB
+    // For TinyUSB, properly reset vendor endpoints (handle both stalled and busy states)
+    if (tud_mounted()) {
+        uint8_t rhport = 0;
+        uint8_t ep_out = XUM_BULK_OUT_ENDPOINT;
+        uint8_t ep_in = XUM_BULK_IN_ENDPOINT | 0x80;
+
+        tud_vendor_n_read_flush(0);
+        tud_vendor_flush();
+        for(int i = 0; i < 100; i++) { tud_task(); DELAY_MS(1); }
+
+        DEBUGF(DBG_INFO, "TinyUSB endpoint states before reset:\n");
+        DEBUGF(DBG_INFO, "  OUT ep=0x%02x: ready=%d, busy=%d, stalled=%d, data_available=%d\n",
+               ep_out, usbd_edpt_ready(rhport, ep_out), usbd_edpt_busy(rhport, ep_out), usbd_edpt_stalled(rhport, ep_out), tud_vendor_n_available(0));
+        DEBUGF(DBG_INFO, "  IN  ep=0x%02x: ready=%d, busy=%d, stalled=%d\n",
+               ep_in, usbd_edpt_ready(rhport, ep_in), usbd_edpt_busy(rhport, ep_in), usbd_edpt_stalled(rhport, ep_in));
+
+        // Handle OUT endpoint - claim, stall, clear, release, close, reopen
+        DEBUGF(DBG_INFO, "Claiming OUT endpoint\n");
+        bool claimed = usbd_edpt_claim(rhport, ep_out);
+        DEBUGF(DBG_INFO, "OUT endpoint claim result: %d\n", claimed);
+
+        DEBUGF(DBG_INFO, "Stalling OUT endpoint\n");
+        usbd_edpt_stall(rhport, ep_out);
+
+        usbd_edpt_clear_stall(rhport, ep_out);
+        DEBUGF(DBG_INFO, "OUT endpoint stall cleared\n");
+
+        DEBUGF(DBG_INFO, "Releasing OUT endpoint\n");
+        usbd_edpt_release(rhport, ep_out);
+/*
+        // Close and reopen endpoint
+        DEBUGF(DBG_INFO, "Closing OUT endpoint\n");
+        usbd_edpt_close(rhport, ep_out);
+
+        // Recreate the endpoint descriptor
+        tusb_desc_endpoint_t ep_desc = {
+            .bLength = sizeof(tusb_desc_endpoint_t),
+            .bDescriptorType = TUSB_DESC_ENDPOINT,
+            .bEndpointAddress = ep_out,
+            .bmAttributes = { .xfer = TUSB_XFER_BULK },
+            .wMaxPacketSize = XUM_ENDPOINT_BULK_SIZE,
+            .bInterval = 0
+        };
+
+        bool reopen_ok = usbd_edpt_open(rhport, &ep_desc);
+        DEBUGF(DBG_INFO, "OUT endpoint reopen result: %d\n", reopen_ok);
+*/
+        // Handle IN endpoint
+        if (usbd_edpt_stalled(rhport, ep_in)) {
+            DEBUGF(DBG_INFO, "Clearing stalled IN endpoint\n");
+            usbd_edpt_clear_stall(rhport, ep_in);
+        }
+        if (usbd_edpt_busy(rhport, ep_in)) {
+            DEBUGF(DBG_INFO, "IN endpoint busy, releasing\n");
+            usbd_edpt_release(rhport, ep_in);
+        }
+
+        tud_vendor_n_read_flush(0); // interesting: with this here, the device will see the incoming bulk transfer on the second cbmctrl atn, without it (or earlier) it doesn't
+        tud_vendor_flush();
+        for(int i = 0; i < 100; i++) { tud_task(); DELAY_MS(1); }
+
+        DEBUGF(DBG_INFO, "TinyUSB endpoint states after reset:\n");
+        DEBUGF(DBG_INFO, "  OUT ep=0x%02x: ready=%d, busy=%d, stalled=%d, data_available=%d\n",
+               ep_out, usbd_edpt_ready(rhport, ep_out), usbd_edpt_busy(rhport, ep_out), usbd_edpt_stalled(rhport, ep_out), tud_vendor_n_available(0));
+        DEBUGF(DBG_INFO, "  IN  ep=0x%02x: ready=%d, busy=%d, stalled=%d\n",
+               ep_in, usbd_edpt_ready(rhport, ep_in), usbd_edpt_busy(rhport, ep_in), usbd_edpt_stalled(rhport, ep_in));
+    }
+#else
     static uint8_t endpoints[] = {
         XUM_BULK_IN_ENDPOINT, XUM_BULK_OUT_ENDPOINT, 0,
     };
@@ -295,6 +446,7 @@ USB_ResetConfig()
     }
 
     Endpoint_SelectEndpoint(lastEndpoint);
+#endif
 }
 
 /*
@@ -303,6 +455,12 @@ USB_ResetConfig()
 bool
 USB_ReadBlock(uint8_t *buf, uint8_t len)
 {
+#if USING_TINYUSB
+    tu_fifo_read_n(&xum_rx_fifo, buf, len);
+    if (doDeviceReset)
+        return false;
+    return true;
+#else
     // Get the requested data from the host
     Endpoint_SelectEndpoint(XUM_BULK_OUT_ENDPOINT);
     Endpoint_Read_Stream_LE(buf, len, AbortOnReset);
@@ -313,6 +471,7 @@ USB_ReadBlock(uint8_t *buf, uint8_t len)
 
     Endpoint_ClearOUT();
     return true;
+#endif
 }
 
 /*
@@ -321,6 +480,70 @@ USB_ReadBlock(uint8_t *buf, uint8_t len)
 bool
 USB_WriteBlock(uint8_t *buf, uint8_t len)
 {
+#if USING_TINYUSB
+    // TinyUSB vendor class write
+    DEBUGF(DBG_INFO, "USB_WriteBlock: starting write of %d bytes\n", len);
+    uint32_t count = 0;
+    uint32_t loop_count = 0;
+    while (count < len && !doDeviceReset) {
+        uint32_t available = tud_vendor_n_write_available(0);
+        if (available > 0) {
+            uint32_t to_write = (len - count < available) ? (len - count) : available;
+            uint32_t written = tud_vendor_n_write(0, buf + count, to_write);
+            count += written;
+            DEBUGF(DBG_INFO, "USB_WriteBlock: wrote %lu bytes, total %lu/%d\n", written, count, len);
+        } else if (++loop_count % 1000 == 0) {
+            DEBUGF(DBG_INFO, "USB_WriteBlock: waiting for TX space, loop %lu\n", loop_count);
+        }
+        // Allow TinyUSB to process
+        tud_task();
+    }
+
+    // Flush and wait for transmission to complete
+    if (count > 0) {
+        DEBUGF(DBG_INFO, "USB_WriteBlock: flushing %lu bytes\n", count);
+        tud_vendor_n_flush(0);
+
+        // Wait for all data to be transmitted
+        // Instead of checking write_available (which may not indicate completion),
+        // wait until TinyUSB processes the data and the endpoint is ready for new transfers
+        int timeout = 10000;  // Increased timeout
+        uint32_t start_available = tud_vendor_n_write_available(0);
+
+        while (timeout-- > 0 && !doDeviceReset) {
+            tud_task();
+
+            // Wait for the buffer to become fully available again
+            // This indicates the previous transfer has completed
+            uint32_t current_available = tud_vendor_n_write_available(0);
+            if (current_available >= CFG_TUD_VENDOR_TX_BUFSIZE) {
+                DEBUGF(DBG_INFO, "USB_WriteBlock: TX fully available (%lu), transmission complete\n", current_available);
+                break;
+            }
+            if (timeout % 1000 == 0) {
+                DEBUGF(DBG_INFO, "USB_WriteBlock: waiting for TX complete, available=%lu, timeout=%d\n", current_available, timeout);
+            }
+        }
+
+        // Additional safety: ensure endpoint is properly reset for next transfer
+        if (timeout <= 0) {
+            DEBUGF(DBG_ERROR, "USB_WriteBlock: timeout waiting for TX completion\n");
+        }
+
+        // Debug: Check IN endpoint state after transmission
+        uint32_t tx_available_post = tud_vendor_n_write_available(0);
+        DEBUGF(DBG_INFO, "USB_WriteBlock: post-flush TX_available=%lu\n", tx_available_post);
+
+        if (tx_available_post < CFG_TUD_VENDOR_TX_BUFSIZE) {
+            DEBUGF(DBG_ERROR, "USB_WriteBlock: IN endpoint not fully available after cleanup!\n");
+        }
+    }
+
+    if (doDeviceReset)
+        return false;
+
+    return (count == len);
+#else
     // Get the requested data from the host
     Endpoint_SelectEndpoint(XUM_BULK_IN_ENDPOINT);
     Endpoint_Write_Stream_LE(buf, len, AbortOnReset);
@@ -331,6 +554,7 @@ USB_WriteBlock(uint8_t *buf, uint8_t len)
 
     Endpoint_ClearIN();
     return true;
+#endif
 }
 
 /*
@@ -341,5 +565,45 @@ USB_WriteBlock(uint8_t *buf, uint8_t len)
 uint8_t
 AbortOnReset()
 {
+#if USING_TINYUSB
+    // For TinyUSB, we just check the reset flag directly in the read/write loops
+    return doDeviceReset ? 1 : 0;
+#else
     return doDeviceReset ? STREAMCALLBACK_Abort : STREAMCALLBACK_Continue;
+#endif
 }
+
+#if USING_TINYUSB
+// TinyUSB device callbacks - equivalent to LUFA's EVENT_USB_Device_ConfigurationChanged
+void tud_mount_cb(void)
+{
+    DEBUGF(DBG_ALL, "tinyusb mount\n");
+    // Reset USB transfer state on mount
+    Reset_usbState();
+}
+
+void tud_umount_cb(void)
+{
+    DEBUGF(DBG_ALL, "tinyusb unmount\n");
+    // Reset state when device is unmounted
+    set_status(STATUS_INIT);
+    // Reset USB transfer state on unmount
+    Reset_usbState();
+}
+
+// USB suspend/resume callbacks - required for proper USB state management
+void tud_suspend_cb(bool remote_wakeup_en)
+{
+    (void) remote_wakeup_en;
+    DEBUGF(DBG_ALL, "tinyusb suspend\n");
+    // Device suspended - reset USB transfer state to clean slate
+    Reset_usbState();
+}
+
+void tud_resume_cb(void)
+{
+    DEBUGF(DBG_ALL, "tinyusb resume\n");
+    // Device resumed from suspend - ensure clean USB transfer state
+    Reset_usbState();
+}
+#endif

@@ -12,15 +12,6 @@
 
 #include <stdint.h>
 #include <string.h>
-#include <avr/io.h>
-#include <avr/power.h>
-#include <avr/wdt.h>
-#include <util/delay.h>
-
-#include <LUFA/Version.h>
-#include <LUFA/Drivers/USB/USB.h>
-
-//#include "xum1541_types.h"      // Version and protocol definitions
 
 // All supported models. Add new ones below.
 #define USBKEY                  0
@@ -32,6 +23,30 @@
 #define PROMICRO_7406           6
 #define MINIMUS                 7
 #define MINIMUS32               8
+#define RP2040                  9
+
+#if MODEL == RP2040
+// RP2040 includes
+#include "pico/stdlib.h"
+#include "tusb.h"
+#include "hardware/sync.h"
+#include "pico/platform.h"
+#else
+// AVR includes
+#include <avr/io.h>
+#include <avr/power.h>
+#include <avr/wdt.h>
+#include <util/delay.h>
+
+#include <LUFA/Version.h>
+#include <LUFA/Drivers/USB/USB.h>
+#endif
+
+#ifdef CFG_TUD_ENABLED
+#define USING_TINYUSB 1
+#else
+#define USING_TINYUSB 0
+#endif
 
 #if MODEL == USBKEY
 #include "cpu-usbkey.h"
@@ -60,6 +75,9 @@
 #elif MODEL == MINIMUS32
 #include "cpu-minimus.h"
 #include "board-minimus.h"
+#elif MODEL == RP2040
+#include "cpu-rp2040.h"
+#include "board-rp2040.h"
 #endif
 
 #include "xum1541_types.h"      // Version and protocol definitions
@@ -74,8 +92,7 @@
 #endif
 #define DEBUGF(level, format, args...)      \
     do {                                    \
-        if (DEBUG_LEVEL >= level)           \
-            printf_P(PSTR(format), ##args); \
+        printf_P(PSTR(format), ##args); \
     } while (0)
 #else
 #define DEBUGF(level, format, args...)
@@ -83,6 +100,15 @@
 
 // USB parameters for descriptor configuration
 #define XUM_DATA_DIR_NONE       0x0f
+
+// Endpoint direction constants - make them consistent across USB stacks
+#if USING_TINYUSB
+#define ENDPOINT_DIR_IN         0x80
+#define ENDPOINT_DIR_OUT        0x00
+#else
+// LUFA already defines these constants
+#endif
+
 #if defined (__AVR_AT90USB1287__)
 #define XUM_ENDPOINT_BULK_SIZE  64
 #else
@@ -185,6 +211,12 @@ void usbIoDone(void);
 int8_t usbSendByte(uint8_t data);
 int8_t usbRecvByte(uint8_t *data);
 void Set_usbDataLen(uint16_t Len);
+void Reset_usbState(void);
+
+#if USING_TINYUSB
+// TinyUSB deferred command processing
+bool process_pending_vendor_cmd(void);
+#endif
 
 // IEC functions
 #define IEC_DELAY()             DELAY_US(2) // Time for IEC lines to change
