@@ -41,6 +41,7 @@ endif()
 set(CORE_SOURCES
     main.c
     commands.c
+    descriptor.c
     iec.c
     s1.c
     s2.c
@@ -53,7 +54,6 @@ set(CORE_SOURCES
 if(MODEL STREQUAL "RP2040")
     set(MODEL_SOURCES
         board-rp2040.c
-        tinyusb_usb_descriptors.c
     )
 else()
     message(FATAL_ERROR "Unsupported MODEL: ${MODEL}. Only RP2040 is supported in CMake build.")

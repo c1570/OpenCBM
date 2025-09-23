@@ -506,7 +506,6 @@ void tud_umount_cb(void)
     Reset_usbState();
 }
 
-// USB suspend/resume callbacks - required for proper USB state management
 void tud_suspend_cb(bool remote_wakeup_en)
 {
     (void) remote_wakeup_en;
@@ -520,5 +519,45 @@ void tud_resume_cb(void)
     DEBUGF(DBG_ALL, "tinyusb resume\n");
     // Device resumed from suspend - ensure clean USB transfer state
     Reset_usbState();
+}
+
+bool tud_vendor_control_xfer_cb(uint8_t rhport, uint8_t stage, tusb_control_request_t const * request)
+{
+    if (stage == CONTROL_STAGE_SETUP) {
+        uint8_t replyBuf[XUM_DEVINFO_SIZE];
+        memset(replyBuf, 0, sizeof(replyBuf));
+
+        int8_t result = usbHandleControl(request->bRequest, replyBuf);
+
+        if (result > 0) {
+            return tud_control_xfer(rhport, request, replyBuf, result);
+        } else if (result == 0) {
+            return tud_control_status(rhport, request);
+        } else {
+            return false; // Stall
+        }
+    }
+
+    return true;
+}
+
+// RX/incoming bulk data callback
+// Note that the TinyUSB VENDOR class implementation assumes that
+// bulk RX data is read here ONLY; it'll claim the FIFO for itself
+// outside the callback.
+void tud_vendor_rx_cb(uint8_t itf, uint8_t const* buffer, uint16_t bufsize) {
+    (void)itf; (void)buffer; (void)bufsize;
+    printf("[XUMDEBUG] tud_vendor_rx_cb called: itf=%d, bufsize=%d\n", itf, bufsize);
+    tu_fifo_write_n(&xum_rx_fifo, buffer, bufsize);
+    // if using RX buffered is enabled, we need to flush the buffer to make room for new data
+    #if CFG_TUD_VENDOR_RX_BUFSIZE > 0
+    tud_vendor_read_flush();
+    #endif
+}
+
+// TX callback to debug the relationship between TX completion and RX state
+void tud_vendor_tx_cb(uint8_t itf, uint32_t count) {
+    (void)itf;
+    printf("[XUMDEBUG] tud_vendor_tx_cb called: itf=%d, count=%lu\n", itf, count);
 }
 #endif
