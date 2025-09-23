@@ -169,7 +169,6 @@ uint16_t const* tud_descriptor_string_cb(uint8_t index, uint16_t langid)
 
 // Forward declarations
 int8_t usbHandleControl(uint8_t cmd, uint8_t *replyBuf);
-void dcd_reset_endpoint_pid(uint8_t ep_addr);
 
 // Invoked when received VENDOR control request
 bool tud_vendor_control_xfer_cb(uint8_t rhport, uint8_t stage, tusb_control_request_t const * request)
@@ -178,14 +177,6 @@ bool tud_vendor_control_xfer_cb(uint8_t rhport, uint8_t stage, tusb_control_requ
     if (stage == CONTROL_STAGE_SETUP) {
         uint8_t replyBuf[XUM_DEVINFO_SIZE];
         memset(replyBuf, 0, sizeof(replyBuf));
-
-        // Check for SET_INTERFACE (bRequest=11) and reset bulk PIDs
-        if (request->bRequest == 11) {
-            printf("[XUM1541-SET_INTERFACE] Received SET_INTERFACE (bRequest=11), resetting bulk PIDs\n");
-            dcd_reset_endpoint_pid(0x83);  // Reset IN endpoint PID
-            dcd_reset_endpoint_pid(0x04);  // Reset OUT endpoint PID
-            return tud_control_status(rhport, request);
-        }
 
         int8_t result = usbHandleControl(request->bRequest, replyBuf);
 

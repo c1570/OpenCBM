@@ -790,6 +790,16 @@ usbHandleControl(uint8_t cmd, uint8_t *replyBuf)
         DEBUGF(DBG_INFO, "executing LIBCVER call - after this, for cbmctrl atn, the incoming bulk transfer should get picked up\n");
         strncpy_P((char *)replyBuf, libcVersion, XUM_DEVINFO_SIZE);
         return XUM_DEVINFO_SIZE;
+    case 11:  // SET_INTERFACE - reset bulk transfer PIDs per USB spec
+        DEBUGF(DBG_INFO, "SET_INTERFACE: resetting bulk endpoint PIDs to DATA0\n");
+#if USING_TINYUSB
+        extern void dcd_reset_endpoint_pid(uint8_t ep_addr);
+        dcd_reset_endpoint_pid(0x83);  // Reset IN endpoint PID
+        dcd_reset_endpoint_pid(0x04);  // Reset OUT endpoint PID
+#else
+        // LUFA handles PID reset via EVENT_USB_Device_ConfigurationChanged()
+#endif
+        return 0;
     default:
         DEBUGF(DBG_ERROR, "ERR: control cmd %d not impl\n", cmd);
         return -1;

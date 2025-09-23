@@ -105,8 +105,7 @@ main(void)
         if (!TimerWorker())
             doDeviceReset = false;
 
-#if USING_TINYUSB
-        if (tud_mounted()) {
+        if (usb_is_ready()) {
             /*
              * If we just got configured, we're ready now (status
              * might also be "ACTIVE" here, don't change that).
@@ -117,27 +116,16 @@ main(void)
             // Check for and process any commands coming in on the bulk pipe.
             USB_BulkWorker();
         } else {
-            // Indicate we are not configured
-            set_status(STATUS_INIT);
-        }
-#else
-        if (USB_DeviceState >= DEVICE_STATE_Configured) {
-            /*
-             * If we just got configured, we're ready now (status
-             * might also be "ACTIVE" here, don't change that).
-             */
-            if (statusValue == STATUS_INIT)
-                set_status(STATUS_READY);
-
-            // Check for and process any commands coming in on the bulk pipe.
-            USB_BulkWorker();
-        } else if (USB_DeviceState < DEVICE_STATE_Addressed) {
-            // TODO: save power here when device is not running
-
-            // Indicate we are not configured
-            set_status(STATUS_INIT);
-        }
+#if !USING_TINYUSB
+            // TODO: save power here when device is not running (LUFA only)
+            if (USB_DeviceState < DEVICE_STATE_Addressed) {
 #endif
+                // Indicate we are not configured
+                set_status(STATUS_INIT);
+#if !USING_TINYUSB
+            }
+#endif
+        }
     }
 }
 
@@ -155,8 +143,8 @@ set_status(uint8_t status)
     board_update_display(status);
 }
 
-// USB event handlers
 #if !USING_TINYUSB
+// LUFA USB event handlers
 void
 EVENT_USB_Device_ConfigurationChanged(void)
 {
@@ -175,9 +163,36 @@ EVENT_USB_Device_ConfigurationChanged(void)
     Endpoint_ConfigureEndpoint(XUM_BULK_OUT_ENDPOINT, EP_TYPE_BULK,
         ENDPOINT_DIR_OUT, XUM_ENDPOINT_BULK_SIZE, ENDPOINT_BANK_DOUBLE);
 }
-#endif
 
-#if !USING_TINYUSB
+/*
+ * The Linux and OSX call the configuration changed entry each time
+ * a transaction is started (e.g., multiple runs of cbmctrl status).
+ * We need to reset the endpoints before reconfiguring them, otherwise
+ * we get a hang the second time through.
+ *
+ * We keep the original endpoint selected after returning.
+ */
+void
+USB_ResetConfig()
+{
+    static uint8_t endpoints[] = {
+        XUM_BULK_IN_ENDPOINT, XUM_BULK_OUT_ENDPOINT, 0,
+    };
+    uint8_t lastEndpoint, *endp;
+
+    lastEndpoint = Endpoint_GetCurrentEndpoint();
+
+    for (endp = endpoints; *endp != 0; endp++) {
+        Endpoint_SelectEndpoint(*endp);
+        Endpoint_ResetFIFO(*endp);
+        Endpoint_ResetDataToggle();
+        if (Endpoint_IsStalled())
+            Endpoint_ClearStall();
+    }
+
+    Endpoint_SelectEndpoint(lastEndpoint);
+}
+
 void
 EVENT_USB_Device_UnhandledControlRequest(void)
 {
@@ -290,11 +305,10 @@ USB_BulkWorker()
         set_status(STATUS_ERROR);
 #if USING_TINYUSB
         // TinyUSB handles stalling automatically when we return false from callbacks
-        return false;
 #else
         Endpoint_StallTransaction();
-        return false;
 #endif
+        return false;
     }
 
     DEBUGF(DBG_INFO, "usbBulkWorker cmpl\n");
@@ -348,105 +362,6 @@ TimerWorker()
     if (board_timer_fired())
         board_update_display(statusValue);
     return true;
-}
-
-/*
- * The Linux and OSX call the configuration changed entry each time
- * a transaction is started (e.g., multiple runs of cbmctrl status).
- * We need to reset the endpoints before reconfiguring them, otherwise
- * we get a hang the second time through.
- *
- * We keep the original endpoint selected after returning.
- */
-void
-USB_ResetConfig()
-{
-#if USING_TINYUSB
-    // For TinyUSB, properly reset vendor endpoints (handle both stalled and busy states)
-    if (tud_mounted()) {
-        uint8_t rhport = 0;
-        uint8_t ep_out = XUM_BULK_OUT_ENDPOINT;
-        uint8_t ep_in = XUM_BULK_IN_ENDPOINT | 0x80;
-
-        tud_vendor_n_read_flush(0);
-        tud_vendor_flush();
-        for(int i = 0; i < 100; i++) { tud_task(); DELAY_MS(1); }
-
-        DEBUGF(DBG_INFO, "TinyUSB endpoint states before reset:\n");
-        DEBUGF(DBG_INFO, "  OUT ep=0x%02x: ready=%d, busy=%d, stalled=%d, data_available=%d\n",
-               ep_out, usbd_edpt_ready(rhport, ep_out), usbd_edpt_busy(rhport, ep_out), usbd_edpt_stalled(rhport, ep_out), tud_vendor_n_available(0));
-        DEBUGF(DBG_INFO, "  IN  ep=0x%02x: ready=%d, busy=%d, stalled=%d\n",
-               ep_in, usbd_edpt_ready(rhport, ep_in), usbd_edpt_busy(rhport, ep_in), usbd_edpt_stalled(rhport, ep_in));
-
-        // Handle OUT endpoint - claim, stall, clear, release, close, reopen
-        DEBUGF(DBG_INFO, "Claiming OUT endpoint\n");
-        bool claimed = usbd_edpt_claim(rhport, ep_out);
-        DEBUGF(DBG_INFO, "OUT endpoint claim result: %d\n", claimed);
-
-        DEBUGF(DBG_INFO, "Stalling OUT endpoint\n");
-        usbd_edpt_stall(rhport, ep_out);
-
-        usbd_edpt_clear_stall(rhport, ep_out);
-        DEBUGF(DBG_INFO, "OUT endpoint stall cleared\n");
-
-        DEBUGF(DBG_INFO, "Releasing OUT endpoint\n");
-        usbd_edpt_release(rhport, ep_out);
-/*
-        // Close and reopen endpoint
-        DEBUGF(DBG_INFO, "Closing OUT endpoint\n");
-        usbd_edpt_close(rhport, ep_out);
-
-        // Recreate the endpoint descriptor
-        tusb_desc_endpoint_t ep_desc = {
-            .bLength = sizeof(tusb_desc_endpoint_t),
-            .bDescriptorType = TUSB_DESC_ENDPOINT,
-            .bEndpointAddress = ep_out,
-            .bmAttributes = { .xfer = TUSB_XFER_BULK },
-            .wMaxPacketSize = XUM_ENDPOINT_BULK_SIZE,
-            .bInterval = 0
-        };
-
-        bool reopen_ok = usbd_edpt_open(rhport, &ep_desc);
-        DEBUGF(DBG_INFO, "OUT endpoint reopen result: %d\n", reopen_ok);
-*/
-        // Handle IN endpoint
-        if (usbd_edpt_stalled(rhport, ep_in)) {
-            DEBUGF(DBG_INFO, "Clearing stalled IN endpoint\n");
-            usbd_edpt_clear_stall(rhport, ep_in);
-        }
-        if (usbd_edpt_busy(rhport, ep_in)) {
-            DEBUGF(DBG_INFO, "IN endpoint busy, releasing\n");
-            usbd_edpt_release(rhport, ep_in);
-        }
-
-        tud_vendor_n_read_flush(0); // interesting: with this here, the device will see the incoming bulk transfer on the second cbmctrl atn, without it (or earlier) it doesn't
-        tud_vendor_flush();
-        for(int i = 0; i < 100; i++) { tud_task(); DELAY_MS(1); }
-
-        DEBUGF(DBG_INFO, "TinyUSB endpoint states after reset:\n");
-        DEBUGF(DBG_INFO, "  OUT ep=0x%02x: ready=%d, busy=%d, stalled=%d, data_available=%d\n",
-               ep_out, usbd_edpt_ready(rhport, ep_out), usbd_edpt_busy(rhport, ep_out), usbd_edpt_stalled(rhport, ep_out), tud_vendor_n_available(0));
-        DEBUGF(DBG_INFO, "  IN  ep=0x%02x: ready=%d, busy=%d, stalled=%d\n",
-               ep_in, usbd_edpt_ready(rhport, ep_in), usbd_edpt_busy(rhport, ep_in), usbd_edpt_stalled(rhport, ep_in));
-    }
-#else
-    static uint8_t endpoints[] = {
-        XUM_BULK_IN_ENDPOINT, XUM_BULK_OUT_ENDPOINT, 0,
-    };
-    uint8_t lastEndpoint, *endp;
-
-    lastEndpoint = Endpoint_GetCurrentEndpoint();
-
-    for (endp = endpoints; *endp != 0; endp++) {
-        Endpoint_SelectEndpoint(*endp);
-        Endpoint_ResetFIFO(*endp);
-        Endpoint_ResetDataToggle();
-        if (Endpoint_IsStalled())
-            Endpoint_ClearStall();
-    }
-
-    Endpoint_SelectEndpoint(lastEndpoint);
-#endif
 }
 
 /*
@@ -574,7 +489,7 @@ AbortOnReset()
 }
 
 #if USING_TINYUSB
-// TinyUSB device callbacks - equivalent to LUFA's EVENT_USB_Device_ConfigurationChanged
+// TinyUSB device callbacks
 void tud_mount_cb(void)
 {
     DEBUGF(DBG_ALL, "tinyusb mount\n");

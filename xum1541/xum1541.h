@@ -48,6 +48,14 @@
 #define USING_TINYUSB 0
 #endif
 
+static inline bool usb_is_ready(void) {
+#if USING_TINYUSB
+    return tud_mounted();
+#else
+    return USB_DeviceState >= DEVICE_STATE_Configured;
+#endif
+}
+
 #if MODEL == USBKEY
 #include "cpu-usbkey.h"
 #include "board-usbkey.h"
