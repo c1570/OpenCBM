@@ -793,9 +793,9 @@ usbHandleControl(uint8_t cmd, uint8_t *replyBuf)
     case 11:  // SET_INTERFACE - reset bulk transfer PIDs per USB spec
         DEBUGF(DBG_INFO, "SET_INTERFACE: resetting bulk endpoint PIDs to DATA0\n");
 #if USING_TINYUSB
-        extern void dcd_reset_endpoint_pid(uint8_t ep_addr);
-        dcd_reset_endpoint_pid(0x83);  // Reset IN endpoint PID
-        dcd_reset_endpoint_pid(0x04);  // Reset OUT endpoint PID
+        extern void dcd_reset_endpoint_pid(uint8_t ep_addr, uint8_t pid);
+        dcd_reset_endpoint_pid(0x83, 1);  // Reset IN endpoint PID
+        dcd_reset_endpoint_pid(0x04, 0);  // Reset OUT endpoint PID
 #else
         // LUFA handles PID reset via EVENT_USB_Device_ConfigurationChanged()
 #endif
