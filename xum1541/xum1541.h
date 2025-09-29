@@ -294,4 +294,20 @@ void     Tape_Reset(bool whatever);         // External configuration reset. Dum
 void     Enter_Tape_Mode(struct ProtocolFunctions ** protoFn); // Enter tape mode if tape device is detected.
 #endif // TAPE_SUPPORT
 
+// WebUSB support constants (for RP2040 with TinyUSB)
+#if USING_TINYUSB
+
+// WebUSB vendor request codes
+#define VENDOR_REQUEST_WEBUSB       0x01
+#define VENDOR_REQUEST_MICROSOFT    0x02
+
+// WebUSB URL schemes
+#define URL_SCHEME_HTTP             0
+#define URL_SCHEME_HTTPS            1
+
+// WebUSB function prototypes
+bool tud_vendor_control_xfer_cb(uint8_t rhport, uint8_t stage, tusb_control_request_t const* request);
+
+#endif // USING_TINYUSB
+
 #endif // _XUM1541_H

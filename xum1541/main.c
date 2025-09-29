@@ -18,12 +18,16 @@
 
 #if USING_TINYUSB
 #include "device/usbd.h"
+
+// External WebUSB descriptor declarations
+extern uint8_t const desc_ms_os_20[];
+extern uint8_t const desc_url_raw[];
+#define desc_url ((tusb_desc_webusb_url_t const*)desc_url_raw)
+
+// Microsoft OS 2.0 descriptor length
+#define MS_OS_20_DESC_LEN 0xB2
 #include "device/usbd_pvt.h"
 #include "class/vendor/vendor_device.h"
-#include "common/tusb_fifo.h"
-
-uint8_t xum_rx_fifo_buf[64];
-tu_fifo_t xum_rx_fifo = TU_FIFO_INIT(xum_rx_fifo_buf, 64, uint8_t, false);
 #endif
 
 #if MODEL == RP2040
@@ -61,7 +65,6 @@ main(void)
 #if USING_TINYUSB
     // Initialize TinyUSB device stack
     tud_init(BOARD_TUD_RHPORT);
-    tu_fifo_clear(&xum_rx_fifo);
 
     // Wait for USB to be ready
     while (!tud_mounted()) {
@@ -244,7 +247,7 @@ USB_BulkWorker()
     static uint32_t debug_count = 0;
 
 #if USING_TINYUSB
-    if(tu_fifo_empty(&xum_rx_fifo))
+    if (tud_vendor_available() == 0)
         return false;
 #else
     /*
@@ -371,10 +374,17 @@ bool
 USB_ReadBlock(uint8_t *buf, uint8_t len)
 {
 #if USING_TINYUSB
-    tu_fifo_read_n(&xum_rx_fifo, buf, len);
-    if (doDeviceReset)
-        return false;
-    return true;
+    uint32_t bytes_read = 0;
+    while (bytes_read < len && !doDeviceReset) {
+        uint32_t available = tud_vendor_available();
+        if (available > 0) {
+            uint32_t to_read = (len - bytes_read < available) ? (len - bytes_read) : available;
+            uint32_t actually_read = tud_vendor_read(buf + bytes_read, to_read);
+            bytes_read += actually_read;
+        }
+        tud_task();
+    }
+    return !doDeviceReset && bytes_read == len;
 #else
     // Get the requested data from the host
     Endpoint_SelectEndpoint(XUM_BULK_OUT_ENDPOINT);
@@ -399,59 +409,17 @@ USB_WriteBlock(uint8_t *buf, uint8_t len)
     // TinyUSB vendor class write
     DEBUGF(DBG_INFO, "USB_WriteBlock: starting write of %d bytes\n", len);
     uint32_t count = 0;
-    uint32_t loop_count = 0;
     while (count < len && !doDeviceReset) {
         uint32_t available = tud_vendor_n_write_available(0);
         if (available > 0) {
             uint32_t to_write = (len - count < available) ? (len - count) : available;
             uint32_t written = tud_vendor_n_write(0, buf + count, to_write);
             count += written;
-            DEBUGF(DBG_INFO, "USB_WriteBlock: wrote %lu bytes, total %lu/%d\n", written, count, len);
-        } else if (++loop_count % 1000 == 0) {
-            DEBUGF(DBG_INFO, "USB_WriteBlock: waiting for TX space, loop %lu\n", loop_count);
         }
-        // Allow TinyUSB to process
         tud_task();
     }
-
-    // Flush and wait for transmission to complete
     if (count > 0) {
-        DEBUGF(DBG_INFO, "USB_WriteBlock: flushing %lu bytes\n", count);
         tud_vendor_n_flush(0);
-
-        // Wait for all data to be transmitted
-        // Instead of checking write_available (which may not indicate completion),
-        // wait until TinyUSB processes the data and the endpoint is ready for new transfers
-        int timeout = 10000;  // Increased timeout
-        uint32_t start_available = tud_vendor_n_write_available(0);
-
-        while (timeout-- > 0 && !doDeviceReset) {
-            tud_task();
-
-            // Wait for the buffer to become fully available again
-            // This indicates the previous transfer has completed
-            uint32_t current_available = tud_vendor_n_write_available(0);
-            if (current_available >= CFG_TUD_VENDOR_TX_BUFSIZE) {
-                DEBUGF(DBG_INFO, "USB_WriteBlock: TX fully available (%lu), transmission complete\n", current_available);
-                break;
-            }
-            if (timeout % 1000 == 0) {
-                DEBUGF(DBG_INFO, "USB_WriteBlock: waiting for TX complete, available=%lu, timeout=%d\n", current_available, timeout);
-            }
-        }
-
-        // Additional safety: ensure endpoint is properly reset for next transfer
-        if (timeout <= 0) {
-            DEBUGF(DBG_ERROR, "USB_WriteBlock: timeout waiting for TX completion\n");
-        }
-
-        // Debug: Check IN endpoint state after transmission
-        uint32_t tx_available_post = tud_vendor_n_write_available(0);
-        DEBUGF(DBG_INFO, "USB_WriteBlock: post-flush TX_available=%lu\n", tx_available_post);
-
-        if (tx_available_post < CFG_TUD_VENDOR_TX_BUFSIZE) {
-            DEBUGF(DBG_ERROR, "USB_WriteBlock: IN endpoint not fully available after cleanup!\n");
-        }
     }
 
     if (doDeviceReset)
@@ -524,6 +492,19 @@ void tud_resume_cb(void)
 bool tud_vendor_control_xfer_cb(uint8_t rhport, uint8_t stage, tusb_control_request_t const * request)
 {
     if (stage == CONTROL_STAGE_SETUP) {
+        // Handle WebUSB vendor requests
+        if (request->bmRequestType == 0xC0) {
+            if (request->bRequest == VENDOR_REQUEST_WEBUSB && request->wIndex == 2) {
+                // Return WebUSB landing page URL
+                return tud_control_xfer(rhport, request, (void*)(uintptr_t)desc_url, desc_url->bLength);
+            }
+            else if (request->bRequest == VENDOR_REQUEST_MICROSOFT && request->wIndex == 7) {
+                // Return Microsoft OS 2.0 descriptor
+                return tud_control_xfer(rhport, request, (void*)(uintptr_t)desc_ms_os_20, TU_MIN(request->wLength, MS_OS_20_DESC_LEN));
+            }
+        }
+
+        // Handle XUM1541 control requests
         uint8_t replyBuf[XUM_DEVINFO_SIZE];
         memset(replyBuf, 0, sizeof(replyBuf));
 
@@ -541,23 +522,8 @@ bool tud_vendor_control_xfer_cb(uint8_t rhport, uint8_t stage, tusb_control_requ
     return true;
 }
 
-// RX/incoming bulk data callback
-// Note that the TinyUSB VENDOR class implementation assumes that
-// bulk RX data is read here ONLY; it'll claim the FIFO for itself
-// outside the callback.
-void tud_vendor_rx_cb(uint8_t itf, uint8_t const* buffer, uint16_t bufsize) {
-    (void)itf; (void)buffer; (void)bufsize;
-    printf("[XUMDEBUG] tud_vendor_rx_cb called: itf=%d, bufsize=%d\n", itf, bufsize);
-    tu_fifo_write_n(&xum_rx_fifo, buffer, bufsize);
-    // if using RX buffered is enabled, we need to flush the buffer to make room for new data
-    #if CFG_TUD_VENDOR_RX_BUFSIZE > 0
-    tud_vendor_read_flush();
-    #endif
-}
-
-// TX callback to debug the relationship between TX completion and RX state
-void tud_vendor_tx_cb(uint8_t itf, uint32_t count) {
-    (void)itf;
-    printf("[XUMDEBUG] tud_vendor_tx_cb called: itf=%d, count=%lu\n", itf, count);
-}
+// We use polling and don't use the bulk RX/TX callbacks
+// Just keeping this for reference
+// void tud_vendor_rx_cb(uint8_t itf, uint8_t const* buffer, uint16_t bufsize) { }
+// void tud_vendor_tx_cb(uint8_t itf, uint32_t count) { }
 #endif

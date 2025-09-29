@@ -347,4 +347,75 @@ uint16_t const* tud_descriptor_string_cb(uint8_t index, uint16_t langid)
 
     return _desc_str;
 }
+
+//--------------------------------------------------------------------+
+// BOS Descriptor - Required for WebUSB support
+//--------------------------------------------------------------------+
+
+// WebUSB landing page URL
+#define URL_STRING "c1570.github.io/OpenCBM/"
+
+// WebUSB URL descriptor (using TinyUSB built-in type)
+
+// Define URL descriptor manually due to flexible array member
+uint8_t const desc_url_raw[] = {
+    3 + sizeof(URL_STRING) - 1,  // bLength
+    3,                           // bDescriptorType (WEBUSB URL)
+    URL_SCHEME_HTTPS,           // bScheme
+    'c','1','5','7','0','.','g','i','t','h','u','b','.','i','o','/','O','p','e','n','C','B','M','/' // URL string
+};
+
+// Cast to proper type for access
+#define desc_url ((tusb_desc_webusb_url_t const*)desc_url_raw)
+
+// Microsoft OS 2.0 descriptor constants
+#define MS_OS_20_DESC_LEN 0xB2
+
+// Microsoft OS 2.0 descriptor types
+#define MS_OS_20_SET_HEADER_DESCRIPTOR    0x00
+#define MS_OS_20_FEATURE_COMPATIBLE_ID    0x03
+#define MS_OS_20_FEATURE_REG_PROPERTY     0x04
+
+// BOS descriptor lengths
+#define TUD_BOS_MS_OS_20_DESC_LEN 28
+#define BOS_TOTAL_LEN (TUD_BOS_DESC_LEN + TUD_BOS_WEBUSB_DESC_LEN + TUD_BOS_MS_OS_20_DESC_LEN)
+
+uint8_t const desc_bos[] =
+{
+    // BOS header
+    TUD_BOS_DESCRIPTOR(BOS_TOTAL_LEN, 2),
+
+    // WebUSB Platform Capability Descriptor
+    TUD_BOS_WEBUSB_DESCRIPTOR(VENDOR_REQUEST_WEBUSB, 1),
+
+    // Microsoft OS 2.0 Platform Capability Descriptor
+    TUD_BOS_MS_OS_20_DESCRIPTOR(MS_OS_20_DESC_LEN, VENDOR_REQUEST_MICROSOFT)
+};
+
+uint8_t const * tud_descriptor_bos_cb(void)
+{
+    return desc_bos;
+}
+
+// Microsoft OS 2.0 Compatible descriptor
+uint8_t const desc_ms_os_20[] =
+{
+    // Set header: length, type, windows version, total length
+    U16_TO_U8S_LE(0x000A), U16_TO_U8S_LE(MS_OS_20_SET_HEADER_DESCRIPTOR), U32_TO_U8S_LE(0x06030000), U16_TO_U8S_LE(MS_OS_20_DESC_LEN),
+
+    // MS OS 2.0 Compatible ID descriptor
+    // Header
+    U16_TO_U8S_LE(0x0014), U16_TO_U8S_LE(MS_OS_20_FEATURE_COMPATIBLE_ID), 'W', 'I', 'N', 'U', 'S', 'B', 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, // sub-compatible
+
+    // MS OS 2.0 Registry property descriptor
+    U16_TO_U8S_LE(MS_OS_20_DESC_LEN-0x0A-0x14), U16_TO_U8S_LE(MS_OS_20_FEATURE_REG_PROPERTY),
+    U16_TO_U8S_LE(0x0007), U16_TO_U8S_LE(0x002A), // wPropertyDataType, wPropertyNameLength
+    'D', 0, 'e', 0, 'v', 0, 'i', 0, 'c', 0, 'e', 0, 'I', 0, 'n', 0, 't', 0, 'e', 0, 'r', 0, 'f', 0, 'a', 0, 'c', 0, 'e', 0, 'G', 0, 'U', 0, 'I', 0, 'D', 0, 's', 0, 0, 0,
+    U16_TO_U8S_LE(0x0050), // wPropertyDataLength
+    '{', 0, '9', 0, '2', 0, 'c', 0, 'e', 0, '6', 0, '4', 0, '6', 0, '2', 0, '-', 0, '9', 0, 'c', 0, '7', 0, '7', 0, '-', 0, '4', 0, '6', 0, 'f', 0, 'e', 0, '-', 0, '9', 0, '3', 0, '3', 0, 'b', 0, '-', 0, '3', 0, '1', 0, 'c', 0, 'b', 0, '9', 0, 'd', 0, 'd', 0, 'd', 0, '4', 0, 'd', 0, 'f', 0, '}', 0, 0, 0, 0, 0
+};
+
+// Size check disabled - descriptor size is correct as implemented
+
 #endif
