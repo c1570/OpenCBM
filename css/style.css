@@ -1,0 +1,453 @@
+/**
+ * XUM1541 WebUSB Interface Styles
+ */
+
+/* Reset and base styles */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    line-height: 1.6;
+    color: #333;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    min-height: 100vh;
+}
+
+/* Header */
+header {
+    text-align: center;
+    padding: 2rem 1rem;
+    color: white;
+}
+
+header h1 {
+    font-size: 2.5rem;
+    margin-bottom: 0.5rem;
+    text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+}
+
+header p {
+    font-size: 1.1rem;
+    opacity: 0.9;
+}
+
+/* Main content */
+main {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 0 1rem 2rem;
+}
+
+/* Cards */
+.card {
+    background: white;
+    border-radius: 12px;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    margin-bottom: 2rem;
+    padding: 2rem;
+    transition: box-shadow 0.3s ease;
+}
+
+.card:hover {
+    box-shadow: 0 8px 15px rgba(0, 0, 0, 0.15);
+}
+
+.card h2 {
+    margin-bottom: 1.5rem;
+    color: #2c3e50;
+    border-bottom: 3px solid #3498db;
+    padding-bottom: 0.5rem;
+}
+
+.card h3 {
+    margin: 1.5rem 0 1rem;
+    color: #34495e;
+}
+
+.card h4 {
+    margin: 1rem 0 0.5rem;
+    color: #7f8c8d;
+}
+
+/* Connection Status */
+.device-status {
+    margin-bottom: 1.5rem;
+}
+
+.status-indicator {
+    display: flex;
+    align-items: center;
+    margin-bottom: 1rem;
+    font-weight: 600;
+    font-size: 1.1rem;
+}
+
+.status-dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    margin-right: 0.75rem;
+    transition: background-color 0.3s ease;
+}
+
+.connected .status-dot {
+    background-color: #27ae60;
+    box-shadow: 0 0 8px rgba(39, 174, 96, 0.5);
+}
+
+.disconnected .status-dot {
+    background-color: #e74c3c;
+}
+
+.device-info {
+    background: #f8f9fa;
+    border-radius: 8px;
+    padding: 1rem;
+    margin-top: 1rem;
+}
+
+.device-info p {
+    margin-bottom: 0.5rem;
+}
+
+/* Buttons */
+.btn {
+    display: inline-block;
+    padding: 0.75rem 1.5rem;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 1rem;
+    font-weight: 500;
+    text-decoration: none;
+    transition: all 0.3s ease;
+    margin-right: 0.5rem;
+    margin-bottom: 0.5rem;
+}
+
+.btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.btn-primary {
+    background-color: #3498db;
+    color: white;
+}
+
+.btn-primary:hover:not(:disabled) {
+    background-color: #2980b9;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(52, 152, 219, 0.3);
+}
+
+.btn-secondary {
+    background-color: #95a5a6;
+    color: white;
+}
+
+.btn-secondary:hover:not(:disabled) {
+    background-color: #7f8c8d;
+}
+
+.btn-warning {
+    background-color: #f39c12;
+    color: white;
+}
+
+.btn-warning:hover:not(:disabled) {
+    background-color: #e67e22;
+}
+
+.btn-danger {
+    background-color: #e74c3c;
+    color: white;
+}
+
+.btn-danger:hover:not(:disabled) {
+    background-color: #c0392b;
+}
+
+/* Drive Operations */
+.drive-selection {
+    margin-bottom: 2rem;
+}
+
+.drive-selection label {
+    display: inline-block;
+    margin-right: 1rem;
+    font-weight: 600;
+}
+
+.drive-selection select {
+    padding: 0.5rem 1rem;
+    border: 2px solid #bdc3c7;
+    border-radius: 4px;
+    font-size: 1rem;
+}
+
+.operation-group {
+    border-top: 1px solid #ecf0f1;
+    padding-top: 1.5rem;
+    margin-top: 1.5rem;
+}
+
+.operation-group:first-child {
+    border-top: none;
+    padding-top: 0;
+    margin-top: 0;
+}
+
+/* Directory Display */
+.directory-output {
+    margin-top: 1rem;
+}
+
+.directory-header h4 {
+    margin-bottom: 1rem;
+    color: #2c3e50;
+}
+
+.directory-empty {
+    text-align: center;
+    color: #7f8c8d;
+    font-style: italic;
+    padding: 2rem;
+    background: #f8f9fa;
+    border-radius: 8px;
+}
+
+.directory-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 1rem;
+    background: white;
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.directory-table thead {
+    background-color: #34495e;
+    color: white;
+}
+
+.directory-table th,
+.directory-table td {
+    padding: 0.75rem 1rem;
+    text-align: left;
+    border-bottom: 1px solid #ecf0f1;
+}
+
+.directory-table th:first-child,
+.directory-table td:first-child {
+    width: 80px;
+    text-align: right;
+}
+
+.directory-table tbody tr:hover {
+    background-color: #f8f9fa;
+}
+
+.filename {
+    font-family: 'Courier New', monospace;
+    font-weight: 600;
+}
+
+/* D64 Operations */
+.d64-operation {
+    margin-bottom: 2rem;
+    padding: 1rem;
+    background: #f8f9fa;
+    border-radius: 8px;
+    border-left: 4px solid #3498db;
+}
+
+/* File Input */
+.file-input-container {
+    margin: 1rem 0;
+}
+
+.file-input {
+    display: none;
+}
+
+.file-label {
+    display: inline-block;
+    padding: 0.75rem 1.5rem;
+    background-color: #ecf0f1;
+    border: 2px dashed #bdc3c7;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    text-align: center;
+    min-width: 200px;
+}
+
+.file-label:hover {
+    background-color: #d5dbdb;
+    border-color: #95a5a6;
+}
+
+.download-options {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    margin: 1rem 0;
+}
+
+.download-options input[type="text"] {
+    padding: 0.75rem;
+    border: 2px solid #bdc3c7;
+    border-radius: 4px;
+    font-size: 1rem;
+    flex: 1;
+    max-width: 200px;
+}
+
+/* Progress Section */
+.progress-container {
+    margin-bottom: 1rem;
+}
+
+.progress-bar {
+    width: 100%;
+    height: 20px;
+    background-color: #ecf0f1;
+    border-radius: 10px;
+    overflow: hidden;
+    box-shadow: inset 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #3498db, #2ecc71);
+    border-radius: 10px;
+    transition: width 0.3s ease;
+    width: 0%;
+}
+
+.progress-info {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 0.5rem;
+    font-weight: 500;
+}
+
+/* Status Log */
+.status-log {
+    background: #2c3e50;
+    color: #ecf0f1;
+    border-radius: 8px;
+    padding: 1rem;
+    max-height: 300px;
+    overflow-y: auto;
+    font-family: 'Courier New', monospace;
+    font-size: 0.9rem;
+    line-height: 1.4;
+}
+
+.log-entry {
+    margin-bottom: 0.5rem;
+    padding: 0.25rem 0;
+    border-left: 3px solid transparent;
+    padding-left: 0.75rem;
+}
+
+.log-info {
+    border-left-color: #3498db;
+}
+
+.log-success {
+    border-left-color: #27ae60;
+    color: #2ecc71;
+}
+
+.log-warning {
+    border-left-color: #f39c12;
+    color: #f1c40f;
+}
+
+.log-error {
+    border-left-color: #e74c3c;
+    color: #e74c3c;
+}
+
+.log-time {
+    color: #95a5a6;
+    margin-right: 0.5rem;
+}
+
+.log-message {
+    font-weight: 500;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+    header h1 {
+        font-size: 2rem;
+    }
+
+    .card {
+        padding: 1.5rem;
+        margin-bottom: 1.5rem;
+    }
+
+    .btn {
+        display: block;
+        width: 100%;
+        margin-bottom: 0.5rem;
+        text-align: center;
+    }
+
+    .download-options {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .download-options input[type="text"] {
+        max-width: none;
+    }
+
+    .directory-table th,
+    .directory-table td {
+        padding: 0.5rem;
+        font-size: 0.9rem;
+    }
+}
+
+/* Animations */
+@keyframes pulse {
+    0% { opacity: 1; }
+    50% { opacity: 0.5; }
+    100% { opacity: 1; }
+}
+
+.status-indicator.connecting .status-dot {
+    animation: pulse 1s infinite;
+    background-color: #f39c12;
+}
+
+/* Scrollbar Styling */
+.status-log::-webkit-scrollbar {
+    width: 8px;
+}
+
+.status-log::-webkit-scrollbar-track {
+    background: #34495e;
+    border-radius: 4px;
+}
+
+.status-log::-webkit-scrollbar-thumb {
+    background: #5a6c7d;
+    border-radius: 4px;
+}
+
+.status-log::-webkit-scrollbar-thumb:hover {
+    background: #7f8c8d;
+}

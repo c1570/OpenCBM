@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>XUM1541 WebUSB Interface</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <header>
+        <h1>🖥️ XUM1541 WebUSB Interface</h1>
+        <p>Connect to Commodore drives via XUM1541 device</p>
+    </header>
+
+    <main>
+        <!-- Device Connection Section -->
+        <section id="connection-section" class="card">
+            <h2>Device Connection</h2>
+            <div class="device-status">
+                <div id="connection-status" class="status-indicator disconnected">
+                    <span class="status-dot"></span>
+                    <span id="connection-text">Not Connected</span>
+                </div>
+                <div class="device-info" id="device-info" style="display: none;">
+                    <p><strong>Device:</strong> <span id="device-name"></span></p>
+                    <p><strong>Firmware Version:</strong> <span id="firmware-version"></span></p>
+                    <p><strong>Capabilities:</strong> <span id="device-capabilities"></span></p>
+                </div>
+            </div>
+            <div class="connection-controls">
+                <button id="connect-btn" class="btn btn-primary">Connect to XUM1541</button>
+                <button id="disconnect-btn" class="btn btn-secondary" disabled>Disconnect</button>
+            </div>
+        </section>
+
+        <!-- Drive Operations Section -->
+        <section id="drive-section" class="card" style="display: none;">
+            <h2>Drive Operations</h2>
+
+            <!-- Drive Selection -->
+            <div class="drive-selection">
+                <label for="drive-select">Drive Number:</label>
+                <select id="drive-select">
+                    <option value="8">8 (Default)</option>
+                    <option value="9">9</option>
+                    <option value="10">10</option>
+                    <option value="11">11</option>
+                </select>
+            </div>
+
+            <!-- Directory Listing -->
+            <div class="operation-group">
+                <h3>📁 Directory Listing</h3>
+                <button id="read-dir-btn" class="btn btn-primary">Read Directory</button>
+                <div id="directory-display" class="directory-output"></div>
+            </div>
+
+            <!-- Reset Drive -->
+            <div class="operation-group">
+                <h3>🔄 Reset Drive</h3>
+                <button id="reset-drive-btn" class="btn btn-warning">Reset Drive</button>
+            </div>
+
+            <!-- Debug Commands -->
+            <div class="operation-group">
+                <h3>🐛 Debug Commands</h3>
+                <button id="atn-btn" class="btn btn-secondary">ATN (Pull ATN Low)</button>
+                <button id="natn-btn" class="btn btn-secondary">NATN (Release ATN)</button>
+            </div>
+
+            <!-- D64 Operations -->
+            <div class="operation-group">
+                <h3>💾 D64 Disk Operations</h3>
+
+                <!-- Write D64 to Drive -->
+                <div class="d64-operation">
+                    <h4>Upload D64 to Drive</h4>
+                    <div class="file-input-container">
+                        <input type="file" id="d64-file-input" accept=".d64" class="file-input">
+                        <label for="d64-file-input" class="file-label">Choose D64 file...</label>
+                        <span id="selected-file-name"></span>
+                    </div>
+                    <button id="write-d64-btn" class="btn btn-primary" disabled>Write to Drive</button>
+                </div>
+
+                <!-- Read D64 from Drive -->
+                <div class="d64-operation">
+                    <h4>Download D64 from Drive</h4>
+                    <div class="download-options">
+                        <input type="text" id="d64-filename" placeholder="Enter filename (e.g., DISK)" value="DISK">
+                        <button id="read-d64-btn" class="btn btn-primary">Read from Drive</button>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Progress Section -->
+        <section id="progress-section" class="card" style="display: none;">
+            <h2>Operation Progress</h2>
+            <div class="progress-container">
+                <div class="progress-bar">
+                    <div id="progress-fill" class="progress-fill"></div>
+                </div>
+                <div class="progress-info">
+                    <span id="progress-text">Ready</span>
+                    <span id="progress-percent">0%</span>
+                </div>
+            </div>
+            <button id="cancel-operation-btn" class="btn btn-danger" style="display: none;">Cancel</button>
+        </section>
+
+        <!-- Status and Log Section -->
+        <section id="status-section" class="card">
+            <h2>Status & Log</h2>
+            <div id="status-log" class="status-log"></div>
+            <button id="clear-log-btn" class="btn btn-secondary">Clear Log</button>
+        </section>
+    </main>
+
+    <!-- Scripts -->
+    <script src="js/webusb-xum1541.js"></script>
+    <script src="js/cbm-protocol.js"></script>
+    <script src="js/d64-handler.js"></script>
+    <script src="js/ui-controller.js"></script>
+</body>
+</html>
